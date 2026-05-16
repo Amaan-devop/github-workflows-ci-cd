@@ -1,0 +1,41 @@
+name: <env> Deployment
+on:
+  push:
+    branches:
+      - <env>
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+        - uses: actions/checkout@v2
+        - name: Use Node.js 22
+          uses: actions/setup-node@v1
+          with:
+            node-version: '22.x'
+        - run: npm install
+        - run: npm i -g @angular/cli@17
+
+        - run: node --max-old-space-size=8192 ./node_modules/@angular/cli/bin/ng build --configuration=<env>
+        - name: Upload Artifact
+          uses: actions/upload-artifact@v4
+          with:
+            name: "<app-name>-${{ github.sha }}"
+            path: ./dist/<app-name>/browser
+            if-no-files-found: error
+            retention-days: 30
+  deploy:
+    needs: build
+    runs-on: <runner-name> # make sure runner has access to s3 and cloudfront
+    environment:
+      name: <env>
+    steps:
+      - name: Download artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: "<app-name>-${{ github.sha }}"
+      - name: Deploy the artifacts
+        run: |
+          aws s3 cp ./ "s3://${{ secrets.S3_BUCKET }}/" --recursive --profile ${{ secrets.AWS_PROFILE }} --region ${{ variables.AWS_DEFAULT_REGION }}
+          aws cloudfront create-invalidation --distribution-id "${{ secrets.CLOUDFRONT_DISTRIBUTION_ID }}" --paths '/*' --profile ${{ secrets.AWS_PROFILE }} --region ${{ variables.AWS_DEFAULT_REGION }}
+      - name: clean-up
+        run: rm -rf ./*
