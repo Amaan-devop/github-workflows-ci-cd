@@ -1,0 +1,83 @@
+name: <Env> Deployment
+on:
+  pull_request:
+    types: [labeled, synchronize]
+  push:
+    - <env-branch>
+  workflow_dispatch:
+
+jobs:
+  build:
+    if: |
+      (github.event.action == 'labeled' && github.event.label.name == 'needs-business-review')
+      || (github.event.action == 'synchronize' && contains(github.event.pull_request.labels.*.name, 'needs-business-review'))
+    runs-on: ubuntu-latest
+    environment:
+      name: <env-nam>
+    steps:
+    - name: Checkout PR branch
+      uses: actions/checkout@v4
+      with:
+        ref: ${{ github.event.pull_request.head.sha }}
+        fetch-depth: 0
+    - name: Apply <env-nam> overlay (net8.0 csproj edits)
+      run: |
+        git fetch origin <branch-nam>
+        git checkout origin/<branch-nam> -- '**/*.csproj'
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v3
+      with:
+        dotnet-version: '8.0.x'
+    - name: Restore dependencies
+      run: dotnet restore
+    - name: Build
+      run: dotnet build --configuration Release
+    - name: Publish
+      run: dotnet publish -c Release -o ./Publish
+    - name: copy procfile
+      run: cp Procfile ./Publish
+    - name: ebextensions copy
+      run: |
+        sed -i 's/BEANSTALK_ENVIRONMET_NAME/${{ vars.ENVIRONMET_NAME }}/g' .platform/hooks/postdeploy/2_install_cloudwatch_agent.sh
+        cp -r .platform ./Publish/
+        cd Publish && zip -r ../<app-name>.zip ./
+    - name: Upload Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: "<app-name>-${{ github.event.pull_request.head.sha }}"
+        path: <app-name>.zip
+        if-no-files-found: error
+        retention-days: 7
+
+  deploy:
+    runs-on: <runner-name>
+    needs: build
+    environment:
+      name: <env-nam>
+    steps:
+    - name: Download artifact
+      uses: actions/download-artifact@v4
+      with:
+        name: "<app-name>-${{ github.event.pull_request.head.sha }}"
+    - name: Deploy
+      run: |
+        BUILD_NUMBER=${GITHUB_RUN_NUMBER}
+        VERSION=br1-pr${{ github.event.pull_request.number }}-${{ github.event.pull_request.head.sha }}
+        aws s3 cp <app-name>.zip s3://elasticbeanstalk-us-east-1-${{ secrets.AWS_ACCOUNT_ID }}/artifact/<app-name>/<app-name>-br1-$BUILD_NUMBER.zip --profile ${{ secrets.AWS_PROFILE }} --region ${{ secrets.AWS_DEFAULT_REGION }}
+        aws elasticbeanstalk create-application-version --application-name ${{ vars.APPLICATION_NAME }} --version-label "$VERSION" --description "PR #${{ github.event.pull_request.number }}" --source-bundle S3Bucket="elasticbeanstalk-us-east-1-${{ secrets.AWS_ACCOUNT_ID }}",S3Key="artifact/<app-name>/<app-name>-br1-$BUILD_NUMBER.zip" --profile ${{ secrets.AWS_PROFILE }} --region ${{ secrets.AWS_DEFAULT_REGION }}
+        aws elasticbeanstalk update-environment --application-name ${{ vars.APPLICATION_NAME }} --environment-name ${{ vars.ENVIRONMET_NAME }} --version-label "$VERSION" --profile ${{ secrets.AWS_PROFILE }} --region ${{ secrets.AWS_DEFAULT_REGION }}
+        aws elasticbeanstalk wait environment-updated --application-name ${{ vars.APPLICATION_NAME }} --environment-name ${{ vars.ENVIRONMET_NAME }} --profile ${{ secrets.AWS_PROFILE }} --region ${{ secrets.AWS_DEFAULT_REGION }}
+
+  comment:
+    runs-on: ubuntu-latest
+    needs: deploy
+    steps:
+    - uses: actions/github-script@v7
+      with:
+        script: |
+          await github.rest.issues.createComment({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            issue_number: context.payload.pull_request.number,
+            body: `🚀 Review env updated: https://br1api.zrehabconnect.com/swagger/index.html\n\nLog in via qa.zrehabconnect.com first to get a JWT.`
+          });

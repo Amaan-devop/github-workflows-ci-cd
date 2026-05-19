@@ -1,0 +1,52 @@
+name: <Env> Deployment
+on:
+  push:
+    branches:
+      - <env-branch>
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v2
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v3
+      with:
+        dotnet-version: '8.0.x'
+    - name: Restore dependencies
+      run: dotnet restore
+    - name: Build
+      run: dotnet build --configuration Release
+    - name: Publish
+      run: dotnet publish -c Release -o ./Publish
+
+    - name: Upload Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: "<app-name>-${{ github.sha }}"
+        path: Publish/**
+        if-no-files-found: error
+        retention-days: 30
+
+  deploy:
+    runs-on: <runner-name>
+    needs: build
+    environment:
+      name: <env>
+    steps:
+    - name: Download artifact
+      uses: actions/download-artifact@v4
+      with:
+        name: "<app-name>-${{ github.sha }}"
+    - name: zip artifacts
+      run: |
+        zip -r <app-name>-lambda.zip ./
+        echo "BUILD_NUMBER=${GITHUB_RUN_NUMBER}" >> $GITHUB_ENV
+    - name: Deploy Lambda to AWS
+      run: |
+        aws lambda update-function-code --function-name ${{ vars.FUNCTION_NAME }} --zip-file fileb://<app-name>-lambda.zip --profile ${{ secrets.AWS_PROFILE }} --region ${{ secrets.AWS_DEFAULT_REGION }}
+        sleep 10
+        NEW_VERSION=$(aws lambda publish-version --function-name ${{ vars.FUNCTION_NAME }} --description $BUILD_NUMBER --profile ${{ secrets.AWS_PROFILE }} --region ${{ secrets.AWS_DEFAULT_REGION }} --query 'Version' --output text)
+        echo "New Lambda version: $NEW_VERSION"
+        aws lambda update-alias --function-name ${{ vars.FUNCTION_NAME }} --name Currently-Deployed --function-version $NEW_VERSION  --profile ${{ secrets.AWS_PROFILE }} --region ${{ secrets.AWS_DEFAULT_REGION }}
+        rm -rf ./*

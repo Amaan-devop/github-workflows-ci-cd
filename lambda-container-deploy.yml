@@ -1,0 +1,52 @@
+name: <Env> Deployment
+on:
+  push:
+    branches:
+      - <env>
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v2
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v3
+      with:
+        dotnet-version: '8.0.x'
+    - name: Restore dependencies
+      run: dotnet restore
+    - name: Build
+      run: dotnet build --configuration Release
+    - name: Publish
+      run: dotnet publish -c Release -o ./Publish && cp Dockerfile ./Publish
+
+    - name: Upload Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: "<app-name>-${{ github.sha }}"
+        path: Publish/**
+        if-no-files-found: error
+        retention-days: 30
+
+  deploy:
+    runs-on: <runner-name>
+    needs: build
+    environment:
+      name: <env>
+    steps:
+    - name: Download artifact
+      uses: actions/download-artifact@v4
+      with:
+        name: "<app-name>-${{ github.sha }}"
+    - name: created docker image
+      run: |
+        echo "BUILD_NUMBER=${GITHUB_RUN_NUMBER}" >> $GITHUB_ENV
+        sudo docker build -t <app-name> .
+    - name: Deploy Lambda function
+      run: |
+        aws ecr get-login-password --region ${{ vars.AWS_DEFAULT_REGION }} --profile ${{ secrets.AWS_PROFILE }} | sudo docker login --username AWS --password-stdin ${{ vars.ECR_REPO_URI }}
+        sudo docker tag <app-name> ${{ vars.ECR_REPO_URI }}/${{ vars.ECR_REPO_NAME}}:$BUILD_NUMBER
+        sudo docker push ${{ vars.ECR_REPO_URI }}/${{ vars.ECR_REPO_NAME}}:$BUILD_NUMBER
+        sudo docker rmi -f ${{ vars.ECR_REPO_URI }}/${{ vars.ECR_REPO_NAME}}:$BUILD_NUMBER
+        sudo docker rmi <app-name>
+        aws lambda update-function-code --function-name ${{ vars.FUNCTION_NAME }} --image-uri ${{ vars.ECR_REPO_URI }}/${{ vars.ECR_REPO_NAME}}:$BUILD_NUMBER --profile ${{ secrets.AWS_PROFILE }} --region ${{ vars.AWS_DEFAULT_REGION }}
