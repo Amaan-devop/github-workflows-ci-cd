@@ -1,0 +1,100 @@
+name: DB Synchronizer
+
+on:
+  workflow_dispatch:
+    inputs:
+      database:
+        description: 'Database Name'
+        required: true
+        default: 'database1'
+        type: choice
+        options:
+          - database1
+          - database2
+
+      purpose:
+        description: 'Purpose'
+        required: true
+        default: 'backup'
+        type: choice
+        options:
+          - backup
+          - backup_and_add_purpose
+          - prod_support_refresh
+
+      renamepurpose:
+        description: 'Backup purpose (backup_and_add_purpose ONLY)'
+        required: false
+        type: string
+        default: 'rcps_tcktID'
+
+      sync_s3:
+        description: 'Sync S3 prod support documents'
+        required: false
+        default: 'no'
+        type: choice
+        options:
+          - 'yes'
+          - 'no'
+
+      s3_start_date:
+        description: 'S3 copy start date (YYYY-MM-DD, optional)'
+        required: false
+        type: string
+
+      s3_end_date:
+        description: 'S3 copy end date (YYYY-MM-DD, optional)'
+        required: false
+        type: string
+
+run-name: ${{ inputs.purpose }} started by @${{ github.actor }}
+
+jobs:
+  db-sync:
+    runs-on: <runner-name> # runner shoudl have to access to databases
+    environment:
+      name: db_sync
+
+    env:
+      PGPASSWORD: ${{ secrets.PASSWORD }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+
+      - name: Add execution permission
+        run: |
+          chmod +x syncronize-databases.sh
+          chmod +x copy-s3-objects.sh
+
+      - name: Run DB synchronization
+        run: |
+          ./syncronize-databases.sh \
+            ${{ vars.HOST }} \
+            ${{ secrets.USERNAME }} \
+            ${{ inputs.database }} \
+            ${{ inputs.purpose }} \
+            ${{ inputs.renamepurpose }}
+      
+      - name: Debug inputs
+        run: |
+          echo "sync_s3 = '${{ inputs.sync_s3 }}'"
+          echo "purpose = '${{ inputs.purpose }}'"
+
+      - name: Copy S3 prod support documents
+        if: ${{ inputs.sync_s3 == 'yes' && inputs.purpose == 'prod_support_refresh' }}
+        run: |
+          CMD="./copy-s3-objects.sh \
+            -b '${{ vars.S3_SRC_BUCKET }}' \
+            -d '${{ vars.S3_DST_BUCKET }}'"
+
+          if [ -n "${{ inputs.s3_start_date }}" ]; then
+            CMD="$CMD -s '${{ inputs.s3_start_date }}'"
+          fi
+
+          if [ -n "${{ inputs.s3_end_date }}" ]; then
+            CMD="$CMD -e '${{ inputs.s3_end_date }}'"
+          fi
+
+          echo "Executing: $CMD"
+          eval "$CMD"
