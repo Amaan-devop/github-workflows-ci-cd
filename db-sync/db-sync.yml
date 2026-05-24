@@ -60,16 +60,16 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
 
       - name: Add execution permission
         run: |
-          chmod +x syncronize-databases.sh
-          chmod +x copy-s3-objects.sh
+          chmod +x syncronize-database.sh
+          chmod +x copy-s3-object.sh
 
       - name: Run DB synchronization
         run: |
-          ./syncronize-databases.sh \
+          ./syncronize-database.sh \
             ${{ vars.HOST }} \
             ${{ secrets.USERNAME }} \
             ${{ inputs.database }} \
@@ -84,7 +84,7 @@ jobs:
       - name: Copy S3 prod support documents
         if: ${{ inputs.sync_s3 == 'yes' && inputs.purpose == 'prod_support_refresh' }}
         run: |
-          CMD="./copy-s3-objects.sh \
+          CMD="./copy-s3-object.sh \
             -b '${{ vars.S3_SRC_BUCKET }}' \
             -d '${{ vars.S3_DST_BUCKET }}'"
 

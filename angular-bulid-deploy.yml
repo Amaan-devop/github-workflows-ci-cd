@@ -7,9 +7,9 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-        - uses: actions/checkout@v2
+        - uses: actions/checkout@v4
         - name: Use Node.js 22
-          uses: actions/setup-node@v1
+          uses: actions/setup-node@v4
           with:
             node-version: '22.x'
         - run: npm install
@@ -35,7 +35,7 @@ jobs:
           name: "<app-name>-${{ github.sha }}"
       - name: Deploy the artifacts
         run: |
-          aws s3 cp ./ "s3://${{ secrets.S3_BUCKET }}/" --recursive --profile ${{ secrets.AWS_PROFILE }} --region ${{ variables.AWS_DEFAULT_REGION }}
-          aws cloudfront create-invalidation --distribution-id "${{ secrets.CLOUDFRONT_DISTRIBUTION_ID }}" --paths '/*' --profile ${{ secrets.AWS_PROFILE }} --region ${{ variables.AWS_DEFAULT_REGION }}
+          aws s3 cp ./ "s3://${{ secrets.S3_BUCKET }}/" --recursive --profile ${{ secrets.AWS_PROFILE }} --region ${{ vars.AWS_DEFAULT_REGION }}
+          aws cloudfront create-invalidation --distribution-id "${{ secrets.CLOUDFRONT_DISTRIBUTION_ID }}" --paths '/*' --profile ${{ secrets.AWS_PROFILE }} --region ${{ vars.AWS_DEFAULT_REGION }}
       - name: clean-up
         run: rm -rf ./*
